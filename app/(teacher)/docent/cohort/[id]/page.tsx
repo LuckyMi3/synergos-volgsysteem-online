@@ -95,8 +95,7 @@ export default async function DocentCohortPage({
       naam: true,
       traject: true,
       uitvoeringId: true,
-      startDatum: true,
-      eindDatum: true,
+      createdAt: true,
       enrollments: {
         select: {
           id: true,
@@ -235,8 +234,7 @@ export default async function DocentCohortPage({
             {cohort.traject || "Traject onbekend"} • uitvoering {cohort.uitvoeringId}
           </p>
           <p style={tinyTextStyle}>
-            Docent: {fullName(teacher)} • periode {formatDate(cohort.startDatum)} t/m{" "}
-            {formatDate(cohort.eindDatum)}
+            Docent: {fullName(teacher)} • cohort aangemaakt op {formatDate(cohort.createdAt)}
           </p>
         </div>
 
