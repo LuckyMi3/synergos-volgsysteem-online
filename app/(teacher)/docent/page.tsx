@@ -3,9 +3,14 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth/session";
 
-function fullName(u: any) {
+function fullName(u: {
+  voornaam: string | null;
+  tussenvoegsel: string | null;
+  achternaam: string | null;
+  email?: string | null;
+}) {
   const parts = [u.voornaam, u.tussenvoegsel, u.achternaam].filter(Boolean);
-  return parts.join(" ").trim();
+  return parts.join(" ").trim() || u.email || "Docent";
 }
 
 export default async function DocentDashboardPage() {
@@ -19,25 +24,11 @@ export default async function DocentDashboardPage() {
     where: { id: userId },
     select: {
       id: true,
+      email: true,
       voornaam: true,
       tussenvoegsel: true,
       achternaam: true,
-      enrollments: {
-        select: {
-          cohort: {
-            select: {
-              id: true,
-              naam: true,
-              traject: true,
-              _count: {
-                select: {
-                  enrollments: true,
-                },
-              },
-            },
-          },
-        },
-      },
+      role: true,
     },
   });
 
@@ -45,55 +36,153 @@ export default async function DocentDashboardPage() {
     redirect("/login");
   }
 
-  const cohorts =
-    teacher.enrollments?.map((e) => e.cohort).filter(Boolean) ?? [];
-
   return (
     <div style={{ padding: 32 }}>
-      <h1>Docentdashboard</h1>
+      <div style={{ marginBottom: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 32 }}>Docentdashboard</h1>
+        <p style={{ marginTop: 8, color: "#666" }}>
+          Welkom, {fullName(teacher)}
+        </p>
+      </div>
 
-      <p style={{ color: "#666" }}>
-        Welkom, {fullName(teacher)}
-      </p>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <div style={cardStyle}>
+          <div style={cardLabel}>Mijn groepen</div>
+          <div style={cardValue}>0</div>
+        </div>
 
-      <div style={{ marginTop: 30 }}>
-        <h2>Mijn groepen</h2>
+        <div style={cardStyle}>
+          <div style={cardLabel}>Studenten</div>
+          <div style={cardValue}>0</div>
+        </div>
 
-        {cohorts.length === 0 && (
-          <div style={{ color: "#999" }}>Geen groepen gekoppeld.</div>
-        )}
+        <div style={cardStyle}>
+          <div style={cardLabel}>Open acties</div>
+          <div style={cardValue}>0</div>
+        </div>
 
-        {cohorts.map((c) => (
-          <div
-            key={c.id}
-            style={{
-              border: "1px solid #e5e7eb",
-              borderRadius: 12,
-              padding: 16,
-              marginBottom: 10,
-              background: "white",
-            }}
-          >
-            <div style={{ fontWeight: 700 }}>
-              {c.naam}
-            </div>
+        <div style={cardStyle}>
+          <div style={cardLabel}>Recente updates</div>
+          <div style={cardValue}>0</div>
+        </div>
+      </div>
 
-            <div style={{ fontSize: 13, color: "#666" }}>
-              {c.traject}
-            </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: 16,
+        }}
+      >
+        <section style={panelStyle}>
+          <h2 style={sectionTitle}>Mijn groepen</h2>
+          <p style={mutedText}>
+            Hier komt straks het overzicht van de cohorts/groepen waar deze docent aan gekoppeld is.
+          </p>
 
-            <div style={{ fontSize: 13 }}>
-              {c._count.enrollments} deelnemers
-            </div>
-
-            <div style={{ marginTop: 8 }}>
-              <Link href={`/docent/cohort/${c.id}`}>
-                Open groep
-              </Link>
-            </div>
+          <div style={emptyStateStyle}>
+            Nog geen groepen zichtbaar in deze eerste versie.
           </div>
-        ))}
+        </section>
+
+        <section style={panelStyle}>
+          <h2 style={sectionTitle}>Snelle acties</h2>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Link href="/docent" style={actionLinkStyle}>
+              Dashboard verversen
+            </Link>
+            <Link href="/login" style={actionLinkStyle}>
+              Terug naar login
+            </Link>
+          </div>
+        </section>
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+          marginTop: 16,
+        }}
+      >
+        <section style={panelStyle}>
+          <h2 style={sectionTitle}>Open acties</h2>
+          <div style={emptyStateStyle}>
+            Hier komen straks open beoordelingen en nieuwe studentinvoer.
+          </div>
+        </section>
+
+        <section style={panelStyle}>
+          <h2 style={sectionTitle}>Studenten die aandacht vragen</h2>
+          <div style={emptyStateStyle}>
+            Hier komt straks een shortlist met relevante studenten.
+          </div>
+        </section>
       </div>
     </div>
   );
 }
+
+const cardStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 18,
+  background: "white",
+};
+
+const cardLabel: React.CSSProperties = {
+  fontSize: 13,
+  color: "#666",
+  marginBottom: 8,
+};
+
+const cardValue: React.CSSProperties = {
+  fontSize: 28,
+  fontWeight: 700,
+  color: "#111",
+};
+
+const panelStyle: React.CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 20,
+  background: "white",
+};
+
+const sectionTitle: React.CSSProperties = {
+  marginTop: 0,
+  marginBottom: 12,
+  fontSize: 20,
+};
+
+const mutedText: React.CSSProperties = {
+  color: "#666",
+  marginTop: 0,
+};
+
+const emptyStateStyle: React.CSSProperties = {
+  border: "1px dashed #d1d5db",
+  borderRadius: 12,
+  padding: 16,
+  color: "#666",
+  background: "#fafafa",
+};
+
+const actionLinkStyle: React.CSSProperties = {
+  display: "inline-block",
+  padding: "10px 12px",
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "#111",
+  background: "white",
+};
