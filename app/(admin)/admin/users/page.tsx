@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { PrismaClient, Role } from "@prisma/client";
 import ImpersonateInlineLink from "../_components/ImpersonateInlineLink";
 
@@ -75,13 +76,21 @@ function buildHref(basePath: string, params: Record<string, string | undefined>)
 export default async function AdminUsersPage({
   searchParams,
 }: {
-  searchParams?: { role?: string; sort?: string; showEmail?: string };
+  searchParams?: Promise<{
+    role?: string;
+    sort?: string;
+    showEmail?: string;
+    q?: string;
+  }>;
 }) {
+  const params = (await searchParams) ?? {};
+
   const basePath = "/admin/users";
 
-  const roleParam = (searchParams?.role ?? "ALL").toUpperCase();
-  const sort = (searchParams?.sort ?? "name_asc") as SortKey;
-  const showEmail = searchParams?.showEmail === "1";
+  const roleParam = (params.role ?? "ALL").toUpperCase();
+  const sort = (params.sort ?? "name_asc") as SortKey;
+  const showEmail = params.showEmail === "1";
+  const q = String(params.q ?? "").trim();
 
   const roleFilter: Role | null =
     roleParam === "STUDENT" || roleParam === "TEACHER" || roleParam === "ADMIN"
@@ -106,7 +115,20 @@ export default async function AdminUsersPage({
       : [{ achternaam: "asc" as const }, { voornaam: "asc" as const }];
 
   const users = await prisma.user.findMany({
-    where: roleFilter ? { role: roleFilter } : undefined,
+    where: {
+      ...(roleFilter ? { role: roleFilter } : {}),
+      ...(q
+        ? {
+            OR: [
+              { voornaam: { contains: q, mode: "insensitive" } },
+              { tussenvoegsel: { contains: q, mode: "insensitive" } },
+              { achternaam: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+              { crmCustomerId: { contains: q, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    },
     orderBy,
     select: {
       id: true,
@@ -176,6 +198,53 @@ export default async function AdminUsersPage({
     fontWeight: 900,
   };
 
+  const inputStyle: React.CSSProperties = {
+    height: 38,
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: "0 12px",
+    fontSize: 14,
+    minWidth: 260,
+    background: "white",
+    color: "#111",
+  };
+
+  const selectStyle: React.CSSProperties = {
+    height: 38,
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: "0 12px",
+    fontSize: 14,
+    background: "white",
+    color: "#111",
+  };
+
+  const buttonStyle: React.CSSProperties = {
+    height: 38,
+    border: "1px solid #111",
+    borderRadius: 10,
+    padding: "0 14px",
+    fontSize: 14,
+    fontWeight: 600,
+    background: "#111",
+    color: "white",
+    cursor: "pointer",
+  };
+
+  const subtleButtonStyle: React.CSSProperties = {
+    height: 38,
+    border: "1px solid #e5e7eb",
+    borderRadius: 10,
+    padding: "0 14px",
+    fontSize: 14,
+    fontWeight: 600,
+    background: "white",
+    color: "#111",
+    textDecoration: "none",
+    display: "inline-flex",
+    alignItems: "center",
+  };
+
   return (
     <div>
       <div
@@ -196,16 +265,15 @@ export default async function AdminUsersPage({
           borderRadius: 12,
           padding: 12,
           display: "flex",
-          flexWrap: "wrap",
-          gap: 10,
-          alignItems: "center",
+          flexDirection: "column",
+          gap: 12,
           marginBottom: 12,
           background: "white",
         }}
       >
-        <div style={{ ...label, marginRight: 6 }}>Filter</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <div style={{ ...label, marginRight: 6 }}>Rol</div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {(["ALL", "STUDENT", "TEACHER", "ADMIN"] as const).map((r) => {
             const active = roleParam === r;
             return (
@@ -214,6 +282,7 @@ export default async function AdminUsersPage({
                 href={buildHref(basePath, {
                   role: r === "ALL" ? undefined : r,
                   sort,
+                  q: q || undefined,
                   showEmail: showEmail ? "1" : undefined,
                 })}
                 style={{ ...chip, ...(active ? activeChip : {}) }}
@@ -223,6 +292,55 @@ export default async function AdminUsersPage({
             );
           })}
         </div>
+
+        <form
+          method="GET"
+          action={basePath}
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 10,
+            alignItems: "center",
+          }}
+        >
+          {roleParam !== "ALL" && <input type="hidden" name="role" value={roleParam} />}
+          {showEmail && <input type="hidden" name="showEmail" value="1" />}
+
+          <input
+            type="text"
+            name="q"
+            defaultValue={q}
+            placeholder="Zoek op naam, email of relatienummer"
+            style={inputStyle}
+          />
+
+          <select name="sort" defaultValue={sort} style={selectStyle}>
+            <option value="name_asc">Naam A–Z</option>
+            <option value="name_desc">Naam Z–A</option>
+            <option value="rel_asc">Relatienummer oplopend</option>
+            <option value="rel_desc">Relatienummer aflopend</option>
+          </select>
+
+          <button type="submit" style={buttonStyle}>
+            Filter toepassen
+          </button>
+
+          <a
+            href={buildHref(basePath, {
+              role: roleParam !== "ALL" ? roleParam : undefined,
+              sort,
+              q: q || undefined,
+              showEmail: showEmail ? undefined : "1",
+            })}
+            style={subtleButtonStyle}
+          >
+            {showEmail ? "Verberg e-mail" : "Toon e-mail"}
+          </a>
+
+          <a href={basePath} style={subtleButtonStyle}>
+            Reset
+          </a>
+        </form>
       </div>
 
       <div style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
@@ -239,15 +357,27 @@ export default async function AdminUsersPage({
 
           <tbody>
             {users.map((u) => {
-              const { list, active, allLocked } = computeRubrics(
-                u.enrollments as any
-              );
+              const { list, active, allLocked } = computeRubrics(u.enrollments as any);
+              const name = fullName(u) || "—";
 
               return (
                 <tr key={u.id}>
                   <td style={td}>
-                    <div style={{ fontWeight: 900 }}>{fullName(u) || "—"}</div>
-                    <ImpersonateInlineLink userId={u.id} label="meekijken" redirectTo="/" />
+                    <div>
+                      <Link
+                        href={`/admin/users/${u.id}`}
+                        style={{
+                          fontWeight: 900,
+                          color: "#111",
+                          textDecoration: "none",
+                        }}
+                      >
+                        {name}
+                      </Link>
+                    </div>
+                    <div style={{ marginTop: 6 }}>
+                      <ImpersonateInlineLink userId={u.id} label="meekijken" redirectTo="/" />
+                    </div>
                   </td>
 
                   <td style={td}>{String(u.role)}</td>
@@ -260,10 +390,7 @@ export default async function AdminUsersPage({
                     ) : (
                       <div style={rubricPill}>
                         {list.map((k) => (
-                          <span
-                            key={k}
-                            style={k === active ? pillActive : pill}
-                          >
+                          <span key={k} style={k === active ? pillActive : pill}>
                             {labelRubric(k)}
                           </span>
                         ))}
@@ -277,6 +404,17 @@ export default async function AdminUsersPage({
                 </tr>
               );
             })}
+
+            {users.length === 0 && (
+              <tr>
+                <td
+                  colSpan={showEmail ? 5 : 4}
+                  style={{ ...td, color: "#666" }}
+                >
+                  Geen gebruikers gevonden.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
