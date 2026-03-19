@@ -50,7 +50,7 @@ export default async function DocentDashboardPage() {
 
   return (
     <div style={{ padding: 32 }}>
-      <h1>Docentdashboard</h1>
+      <h1>Docentdashboard temp</h1>
 
       <p style={{ color: "#666" }}>
         Welkom, {fullName(teacher)}
