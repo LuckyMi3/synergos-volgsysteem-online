@@ -1,0 +1,238 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl bewust weggelaten omdat DIRECT_URL nu niet in .env staat
+}
+
+model User {
+  id            String   @id @default(cuid())
+  crmCustomerId String   @unique
+  voornaam      String
+  tussenvoegsel String?
+  achternaam    String
+  email         String
+  mobiel        String?
+  role          Role
+  createdAt     DateTime @default(now())
+
+  // Auth (V1: eenvoudige login, admin zet/reset wachtwoord)
+  passwordHash String?
+
+  // Cohort membership (student/teacher/admin)
+  enrollments Enrollment[]
+
+  // Student assessments (as student)
+  assessments Assessment[] @relation("StudentAssessments")
+
+  // Teacher per-question corrections
+  teacherScores TeacherScore[]
+
+  // Teacher publish gate per assessment
+  teacherReviews TeacherReview[]
+
+  // ✅ Credentials (1-op-1)
+  credential StudentCredential?
+  sessions   Session[]
+}
+
+/**
+ * =========================
+ * Uitvoering (schooljaar / “25/26” etc.)
+ * =========================
+ * Bestaat in je DB (drift). Cohort.uitvoeringId verwijst hiernaar.
+ */
+model Uitvoering {
+  id        String   @id // bijv. "25/26"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cohorts Cohort[]
+}
+
+model Cohort {
+  id String @id @default(cuid())
+
+  // FK -> Uitvoering.id (drift fix)
+  uitvoeringId String
+  uitvoering   Uitvoering @relation(fields: [uitvoeringId], references: [id], onDelete: Restrict)
+
+  naam      String
+  traject   String?
+  createdAt DateTime @default(now())
+
+  enrollments Enrollment[]
+
+  // Drift fix: uniek per uitvoering + cohortnaam
+  @@unique([uitvoeringId, naam], name: "uitvoeringId_naam")
+}
+
+model Enrollment {
+  id               String   @id @default(cuid())
+  userId           String
+  cohortId         String
+  coachNaam        String?
+  trajectStatus    String?
+  assessmentLocked Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id])
+  cohort Cohort @relation(fields: [cohortId], references: [id])
+
+  @@unique([userId, cohortId], name: "userId_cohortId")
+}
+
+/**
+ * =========================
+ * Assessments & scores
+ * =========================
+ */
+
+model Assessment {
+  id String @id @default(cuid())
+
+  studentId String
+  student   User   @relation("StudentAssessments", fields: [studentId], references: [id])
+
+  rubricKey String
+  moment    Moment
+
+  submittedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scores         Score[]
+  teacherScores  TeacherScore[]
+  teacherReviews TeacherReview[]
+
+  @@unique([studentId, rubricKey, moment], name: "student_rubric_moment")
+}
+
+model Score {
+  id           String     @id @default(cuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+
+  themeId    String
+  questionId String
+
+  score   Int
+  comment String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assessmentId, themeId, questionId], name: "assessment_theme_question")
+}
+
+/**
+ * =========================
+ * Teacher layer (multi-docent)
+ * =========================
+ */
+
+model TeacherScore {
+  id String @id @default(cuid())
+
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+
+  teacherId String
+  teacher   User   @relation(fields: [teacherId], references: [id])
+
+  themeId    String
+  questionId String
+
+  correctedScore Int?
+  feedback       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assessmentId, teacherId, themeId, questionId], name: "assessment_teacher_theme_question")
+}
+
+model TeacherReview {
+  id String @id @default(cuid())
+
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+
+  teacherId String
+  teacher   User   @relation(fields: [teacherId], references: [id])
+
+  correctedScore Int?
+  feedback       String?
+  status         ReviewStatus @default(DRAFT)
+  publishedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assessmentId, teacherId], name: "assessment_teacher")
+}
+
+model StudentCredential {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+
+  // Tentamens
+  exam1Completed Boolean @default(false) // Ontwikkelingspsychologie
+  exam2Completed Boolean @default(false) // Haptonomische Fenomenen
+  exam3Completed Boolean @default(false) // Psychopathologie
+
+  // Basiskennis
+  mbkCompleted  Boolean @default(false)
+  psbkCompleted Boolean @default(false)
+
+  // Praktijkvorming
+  leertherapieCount  Int     @default(0) // vereist 10
+  intervisieCount    Int     @default(0) // vereist 10
+  supervisieCount    Int     @default(0) // vereist 12
+  eindsupervisieDone Boolean @default(false)
+
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum Moment {
+  M1
+  M2
+  M3
+}
+
+enum ReviewStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model Session {
+  id        String @id @default(cuid())
+  tokenHash String @unique
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+  @@index([expiresAt])
+}
