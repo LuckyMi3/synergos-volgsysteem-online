@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import type { CSSProperties } from "react";
 import { prisma } from "@/lib/prisma";
 import { getSessionUserId } from "@/lib/auth/session";
@@ -12,16 +12,7 @@ function fullName(u: {
   email?: string | null;
 }) {
   const parts = [u.voornaam, u.tussenvoegsel, u.achternaam].filter(Boolean);
-  return parts.join(" ").trim() || u.email || "Docent";
-}
-
-function uniqueById<T extends { id: string }>(items: T[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    if (seen.has(item.id)) return false;
-    seen.add(item.id);
-    return true;
-  });
+  return parts.join(" ").trim() || u.email || "Onbekend";
 }
 
 function formatDateTime(value: Date | null | undefined) {
@@ -59,50 +50,30 @@ function momentLabel(moment: string | null | undefined) {
   return String(moment).toUpperCase();
 }
 
-export default async function DocentDashboardPage() {
+export default async function DocentCohortPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const userId = await getSessionUserId();
 
   if (!userId) {
     redirect("/login");
   }
 
+  const { id } = await params;
+
   const teacher = await prisma.user.findUnique({
     where: { id: userId },
     select: {
       id: true,
-      email: true,
       voornaam: true,
       tussenvoegsel: true,
       achternaam: true,
-      role: true,
+      email: true,
       enrollments: {
-        select: {
-          cohort: {
-            select: {
-              id: true,
-              naam: true,
-              traject: true,
-              uitvoeringId: true,
-              createdAt: true,
-              enrollments: {
-                select: {
-                  id: true,
-                  assessmentLocked: true,
-                  user: {
-                    select: {
-                      id: true,
-                      role: true,
-                      voornaam: true,
-                      tussenvoegsel: true,
-                      achternaam: true,
-                      email: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
+        where: { cohortId: id },
+        select: { id: true },
       },
     },
   });
@@ -111,58 +82,32 @@ export default async function DocentDashboardPage() {
     redirect("/login");
   }
 
-  const cohorts = uniqueById(
-    teacher.enrollments.map((e) => e.cohort).filter(Boolean)
-  );
+  const hasAccessToCohort = teacher.enrollments.length > 0;
 
-  const cohortIds = cohorts.map((c) => c.id);
+  if (!hasAccessToCohort) {
+    notFound();
+  }
 
-  const students = await prisma.user.findMany({
-    where: {
-      role: Role.STUDENT,
-      enrollments: {
-        some: {
-          cohortId: { in: cohortIds.length ? cohortIds : ["__none__"] },
-        },
-      },
-    },
+  const cohort = await prisma.cohort.findUnique({
+    where: { id },
     select: {
       id: true,
-      email: true,
-      voornaam: true,
-      tussenvoegsel: true,
-      achternaam: true,
+      naam: true,
+      traject: true,
+      uitvoeringId: true,
+      createdAt: true,
       enrollments: {
-        where: {
-          cohortId: { in: cohortIds.length ? cohortIds : ["__none__"] },
-        },
-        select: {
-          assessmentLocked: true,
-          cohort: {
-            select: {
-              id: true,
-              naam: true,
-              traject: true,
-            },
-          },
-        },
-      },
-      assessments: {
-        orderBy: { updatedAt: "desc" },
-        take: 5,
         select: {
           id: true,
-          rubricKey: true,
-          moment: true,
-          submittedAt: true,
-          updatedAt: true,
-          teacherReviews: {
-            where: { teacherId: userId },
+          assessmentLocked: true,
+          user: {
             select: {
               id: true,
-              status: true,
-              updatedAt: true,
-              publishedAt: true,
+              role: true,
+              email: true,
+              voornaam: true,
+              tussenvoegsel: true,
+              achternaam: true,
             },
           },
         },
@@ -170,43 +115,31 @@ export default async function DocentDashboardPage() {
     },
   });
 
-  const studentIds = students.map((s) => s.id);
+  if (!cohort) {
+    notFound();
+  }
 
-  const submittedAssessments = await prisma.assessment.findMany({
+  const studentEnrollments = cohort.enrollments.filter(
+    (e) => e.user.role === Role.STUDENT
+  );
+  const teacherEnrollments = cohort.enrollments.filter(
+    (e) => e.user.role === Role.TEACHER
+  );
+
+  const studentIds = studentEnrollments.map((e) => e.user.id);
+
+  const assessments = await prisma.assessment.findMany({
     where: {
       studentId: { in: studentIds.length ? studentIds : ["__none__"] },
-      submittedAt: { not: null },
     },
-    orderBy: [{ submittedAt: "desc" }, { updatedAt: "desc" }],
+    orderBy: [{ updatedAt: "desc" }],
     select: {
       id: true,
+      studentId: true,
       rubricKey: true,
       moment: true,
       submittedAt: true,
       updatedAt: true,
-      student: {
-        select: {
-          id: true,
-          voornaam: true,
-          tussenvoegsel: true,
-          achternaam: true,
-          email: true,
-          enrollments: {
-            where: {
-              cohortId: { in: cohortIds.length ? cohortIds : ["__none__"] },
-            },
-            select: {
-              cohort: {
-                select: {
-                  id: true,
-                  naam: true,
-                  traject: true,
-                },
-              },
-            },
-          },
-        },
-      },
       teacherReviews: {
         where: { teacherId: userId },
         select: {
@@ -219,393 +152,264 @@ export default async function DocentDashboardPage() {
     },
   });
 
-  const draftTeacherReviews = await prisma.teacherReview.findMany({
-    where: {
-      teacherId: userId,
-      status: ReviewStatus.DRAFT,
-      assessment: {
-        studentId: { in: studentIds.length ? studentIds : ["__none__"] },
-      },
-    },
-    orderBy: { updatedAt: "desc" },
-    select: {
-      id: true,
-      updatedAt: true,
-      assessment: {
-        select: {
-          id: true,
-          rubricKey: true,
-          moment: true,
-          submittedAt: true,
-          student: {
-            select: {
-              id: true,
-              voornaam: true,
-              tussenvoegsel: true,
-              achternaam: true,
-              email: true,
-              enrollments: {
-                where: {
-                  cohortId: { in: cohortIds.length ? cohortIds : ["__none__"] },
-                },
-                select: {
-                  cohort: {
-                    select: {
-                      id: true,
-                      naam: true,
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  });
+  const assessmentsByStudent = new Map<string, typeof assessments>();
+  for (const assessment of assessments) {
+    const list = assessmentsByStudent.get(assessment.studentId) ?? [];
+    list.push(assessment);
+    assessmentsByStudent.set(assessment.studentId, list);
+  }
 
-  const missingReviewAssessments = submittedAssessments.filter(
-    (a) => a.teacherReviews.length === 0
-  );
+  const rows = studentEnrollments
+    .map((enrollment) => {
+      const student = enrollment.user;
+      const studentAssessments = assessmentsByStudent.get(student.id) ?? [];
+      const latestAssessment = studentAssessments[0] ?? null;
 
-  const actionableAssessmentIds = new Set<string>();
-  for (const a of missingReviewAssessments) actionableAssessmentIds.add(a.id);
-  for (const r of draftTeacherReviews) actionableAssessmentIds.add(r.assessment.id);
-
-  const openActions = actionableAssessmentIds.size;
-
-  const recentActivity = submittedAssessments.slice(0, 6).map((a) => {
-    const cohortName = a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
-    return {
-      id: a.id,
-      title: `${fullName(a.student)} heeft ${rubricLabel(a.rubricKey)} ${momentLabel(a.moment)} ingediend`,
-      meta: `${cohortName} • ${formatDateTime(a.submittedAt)}`,
-    };
-  });
-
-  const studentsNeedingAttention = students
-    .map((student) => {
-      const latest = student.assessments[0] ?? null;
-      const cohortName = student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
-
-      const latestSubmittedWithoutReview = student.assessments.find(
+      const pendingAssessment = studentAssessments.find(
         (a) => a.submittedAt && a.teacherReviews.length === 0
       );
 
-      const latestDraft = student.assessments.find((a) =>
+      const draftReview = studentAssessments.find((a) =>
         a.teacherReviews.some((r) => r.status === ReviewStatus.DRAFT)
       );
 
-      let reason = "";
-      let sortScore = 0;
-      let updatedAt: Date | null = null;
+      let statusText = "Nog geen assessmentactiviteit";
+      let statusKind: "open" | "draft" | "done" | "idle" = "idle";
 
-      if (latestSubmittedWithoutReview) {
-        reason = `Nieuwe studentinvoer wacht op beoordeling • ${rubricLabel(
-          latestSubmittedWithoutReview.rubricKey
-        )} ${momentLabel(latestSubmittedWithoutReview.moment)}`;
-        sortScore = 3;
-        updatedAt =
-          latestSubmittedWithoutReview.submittedAt ??
-          latestSubmittedWithoutReview.updatedAt;
-      } else if (latestDraft) {
-        reason = `Conceptfeedback staat nog open • ${rubricLabel(
-          latestDraft.rubricKey
-        )} ${momentLabel(latestDraft.moment)}`;
-        sortScore = 2;
-        updatedAt = latestDraft.updatedAt;
-      } else if (latest) {
-        reason = `Laatste activiteit op ${formatDate(latest.updatedAt)}`;
-        sortScore = 1;
-        updatedAt = latest.updatedAt;
-      } else {
-        reason = "Nog geen assessmentactiviteit zichtbaar";
-        sortScore = 0;
-        updatedAt = null;
+      if (pendingAssessment) {
+        statusText = `Wacht op beoordeling • ${rubricLabel(
+          pendingAssessment.rubricKey
+        )} ${momentLabel(pendingAssessment.moment)}`;
+        statusKind = "open";
+      } else if (draftReview) {
+        statusText = `Conceptfeedback open • ${rubricLabel(
+          draftReview.rubricKey
+        )} ${momentLabel(draftReview.moment)}`;
+        statusKind = "draft";
+      } else if (latestAssessment?.teacherReviews?.length) {
+        statusText = `Beoordeeld • ${rubricLabel(
+          latestAssessment.rubricKey
+        )} ${momentLabel(latestAssessment.moment)}`;
+        statusKind = "done";
+      } else if (latestAssessment) {
+        statusText = `Laatste activiteit • ${rubricLabel(
+          latestAssessment.rubricKey
+        )} ${momentLabel(latestAssessment.moment)}`;
+        statusKind = "idle";
       }
 
       return {
         id: student.id,
         name: fullName(student),
-        cohortName,
-        reason,
-        sortScore,
-        updatedAt,
+        email: student.email,
+        assessmentLocked: enrollment.assessmentLocked,
+        latestAssessment,
+        pendingAssessment,
+        draftReview,
+        assessmentCount: studentAssessments.length,
+        statusText,
+        statusKind,
       };
     })
-    .sort((a, b) => {
-      if (b.sortScore !== a.sortScore) return b.sortScore - a.sortScore;
-      const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return bt - at;
-    })
-    .slice(0, 6);
+    .sort((a, b) => a.name.localeCompare(b.name, "nl"));
 
-  const cohortCards = cohorts.map((cohort) => {
-    const studentEnrollments = cohort.enrollments.filter(
-      (e) => e.user.role === Role.STUDENT
-    );
-    const teacherEnrollments = cohort.enrollments.filter(
-      (e) => e.user.role === Role.TEACHER
-    );
-    const unlockedCount = studentEnrollments.filter(
-      (e) => !e.assessmentLocked
-    ).length;
-
-    return {
-      id: cohort.id,
-      naam: cohort.naam,
-      traject: cohort.traject || "Traject onbekend",
-      uitvoeringId: cohort.uitvoeringId,
-      studentCount: studentEnrollments.length,
-      teacherCount: teacherEnrollments.length,
-      openCount: unlockedCount,
-    };
-  });
-
-  const groupCount = cohortCards.length;
-  const studentCount = students.length;
-  const recentUpdates = recentActivity.length;
-  const draftCount = draftTeacherReviews.length;
-  const waitingCount = missingReviewAssessments.length;
+  const openCount = rows.filter((r) => r.statusKind === "open").length;
+  const draftCount = rows.filter((r) => r.statusKind === "draft").length;
+  const lockedCount = rows.filter((r) => r.assessmentLocked).length;
 
   return (
     <div style={pageStyle}>
-      <div style={heroStyle}>
+      <div style={topBarStyle}>
         <div>
-          <h1 style={h1Style}>Docentdashboard</h1>
-          <p style={heroTextStyle}>Welkom, {fullName(teacher)}</p>
-          <p style={heroSubtleStyle}>
-            Dit is je werkstartscherm: groepen, open beoordelingen en recente
-            studentactiviteit in één overzicht.
+          <div style={crumbsStyle}>
+            <Link href="/docent" style={crumbLinkStyle}>
+              Docentdashboard
+            </Link>
+            <span> / </span>
+            <span>{cohort.naam}</span>
+          </div>
+
+          <h1 style={h1Style}>{cohort.naam}</h1>
+          <p style={subTextStyle}>
+            {cohort.traject || "Traject onbekend"} • uitvoering {cohort.uitvoeringId}
           </p>
+          <p style={tinyTextStyle}>
+            Docent: {fullName(teacher)} • cohort aangemaakt op {formatDate(cohort.createdAt)}
+          </p>
+        </div>
+
+        <div style={headerActionWrapStyle}>
+          <Link href="/docent" style={backButtonStyle}>
+            Terug naar dashboard
+          </Link>
         </div>
       </div>
 
       <div style={statsGridStyle}>
-        <div style={cardStyle}>
-          <div style={cardLabel}>Mijn groepen</div>
-          <div style={cardValue}>{groupCount}</div>
-          <div style={cardHint}>Cohorts waar je nu aan gekoppeld bent</div>
+        <div style={statCardStyle}>
+          <div style={statLabelStyle}>Studenten</div>
+          <div style={statValueStyle}>{rows.length}</div>
         </div>
 
-        <div style={cardStyle}>
-          <div style={cardLabel}>Studenten</div>
-          <div style={cardValue}>{studentCount}</div>
-          <div style={cardHint}>Unieke studenten binnen jouw groepen</div>
+        <div style={statCardStyle}>
+          <div style={statLabelStyle}>Docenten</div>
+          <div style={statValueStyle}>{teacherEnrollments.length}</div>
         </div>
 
-        <div style={cardStyle}>
-          <div style={cardLabel}>Open acties</div>
-          <div style={cardValue}>{openActions}</div>
-          <div style={cardHint}>
-            {waitingCount} wachtend • {draftCount} in concept
-          </div>
+        <div style={statCardStyle}>
+          <div style={statLabelStyle}>Open beoordelingen</div>
+          <div style={statValueStyle}>{openCount}</div>
         </div>
 
-        <div style={cardStyle}>
-          <div style={cardLabel}>Recente updates</div>
-          <div style={cardValue}>{recentUpdates}</div>
-          <div style={cardHint}>Laatste ingediende assessments</div>
+        <div style={statCardStyle}>
+          <div style={statLabelStyle}>Conceptfeedback</div>
+          <div style={statValueStyle}>{draftCount}</div>
+        </div>
+
+        <div style={statCardStyle}>
+          <div style={statLabelStyle}>Afgesloten</div>
+          <div style={statValueStyle}>{lockedCount}</div>
         </div>
       </div>
 
-      <div style={topGridStyle}>
+      <div style={contentGridStyle}>
         <section style={panelStyle}>
           <div style={panelHeaderStyle}>
             <div>
-              <h2 style={sectionTitle}>Mijn groepen</h2>
-              <p style={mutedText}>
-                Overzicht van de cohorts waar jij als docent aan gekoppeld bent.
+              <h2 style={sectionTitleStyle}>Studenten in dit cohort</h2>
+              <p style={sectionTextStyle}>
+                Vanuit hier kun je snel zien wie openstaat, wie conceptfeedback
+                heeft en waar recente activiteit zit.
               </p>
             </div>
           </div>
 
-          {cohortCards.length === 0 ? (
-            <div style={emptyStateStyle}>Nog geen groepen gekoppeld.</div>
+          {rows.length === 0 ? (
+            <div style={emptyStateStyle}>Geen studenten gevonden in dit cohort.</div>
           ) : (
-            <div style={groupGridStyle}>
-              {cohortCards.map((c) => (
-                <Link
-                  key={c.id}
-                  href={`/docent/cohort/${c.id}`}
-                  style={groupCardLinkStyle}
-                >
-                  <div style={groupCardStyle}>
-                    <div style={groupTitleStyle}>{c.naam}</div>
-                    <div style={groupMetaStyle}>
-                      {c.traject} • uitvoering {c.uitvoeringId}
-                    </div>
+            <div style={tableWrapStyle}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr style={theadRowStyle}>
+                    <th style={thStyle}>Student</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Laatste activiteit</th>
+                    <th style={thStyle}>Assessments</th>
+                    <th style={thStyle}>Slot</th>
+                    <th style={thStyle}>Actie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.id}>
+                      <td style={tdStyle}>
+                        <div style={nameStyle}>{row.name}</div>
+                        <div style={emailStyle}>{row.email || "—"}</div>
+                      </td>
 
-                    <div style={groupStatsRowStyle}>
-                      <div style={miniStatStyle}>
-                        <div style={miniStatValueStyle}>{c.studentCount}</div>
-                        <div style={miniStatLabelStyle}>studenten</div>
-                      </div>
-                      <div style={miniStatStyle}>
-                        <div style={miniStatValueStyle}>{c.teacherCount}</div>
-                        <div style={miniStatLabelStyle}>docenten</div>
-                      </div>
-                      <div style={miniStatStyle}>
-                        <div style={miniStatValueStyle}>{c.openCount}</div>
-                        <div style={miniStatLabelStyle}>open</div>
-                      </div>
-                    </div>
+                      <td style={tdStyle}>
+                        <span style={statusPillStyle(row.statusKind)}>
+                          {row.statusText}
+                        </span>
+                      </td>
 
-                    <div style={groupFooterStyle}>
-                      <span style={softBadgeStyle}>
-                        {c.openCount > 0
-                          ? `${c.openCount} studenten nog actief`
-                          : "Geen open studentslots"}
-                      </span>
+                      <td style={tdStyle}>
+                        {row.latestAssessment ? (
+                          <div>
+                            <div style={activityMainStyle}>
+                              {rubricLabel(row.latestAssessment.rubricKey)}{" "}
+                              {momentLabel(row.latestAssessment.moment)}
+                            </div>
+                            <div style={activitySubStyle}>
+                              bijgewerkt op {formatDateTime(row.latestAssessment.updatedAt)}
+                            </div>
+                          </div>
+                        ) : (
+                          <span style={mutedInlineStyle}>—</span>
+                        )}
+                      </td>
 
-                      <span style={groupOpenStyle}>Open groep →</span>
-                    </div>
-                  </div>
-                </Link>
-              ))}
+                      <td style={tdStyle}>{row.assessmentCount}</td>
+
+                      <td style={tdStyle}>
+                        {row.assessmentLocked ? (
+                          <span style={lockedPillStyle}>Afgesloten</span>
+                        ) : (
+                          <span style={openPillStyle}>Open</span>
+                        )}
+                      </td>
+
+                      <td style={tdStyle}>
+                        <div style={actionColStyle}>
+                          <Link
+                            href={`/admin/users/${row.id}`}
+                            style={tableLinkStyle}
+                          >
+                            Open student
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </section>
 
-        <section style={panelStyle}>
-          <h2 style={sectionTitle}>Snelle acties</h2>
-          <div style={actionListStyle}>
-            <Link href="/docent" style={actionLinkStyle}>
-              Dashboard verversen
-            </Link>
-            <Link href="/login" style={actionLinkStyle}>
-              Wissel van account
-            </Link>
-            <div style={actionGhostStyle}>
-              {waitingCount > 0
-                ? `${waitingCount} ingediende assessments wachten nog op jouw review`
-                : "Geen onbeoordeelde ingediende assessments"}
-            </div>
-            <div style={actionGhostStyle}>
-              {draftCount > 0
-                ? `${draftCount} conceptbeoordelingen zijn nog niet gepubliceerd`
-                : "Geen open conceptfeedback"}
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div style={middleGridStyle}>
-        <section style={panelStyle}>
-          <div style={panelHeaderStyle}>
-            <div>
-              <h2 style={sectionTitle}>Open acties</h2>
-              <p style={mutedText}>
-                Werk dat nu direct jouw aandacht vraagt.
-              </p>
+        <section style={sidePanelStyle}>
+          <div style={panelStyle}>
+            <h2 style={sectionTitleStyle}>Werkoverzicht</h2>
+            <div style={sideListStyle}>
+              <div style={sideItemStyle}>
+                <div style={sideItemTitleStyle}>Open beoordelingen</div>
+                <div style={sideItemValueStyle}>{openCount}</div>
+              </div>
+              <div style={sideItemStyle}>
+                <div style={sideItemTitleStyle}>Conceptfeedback</div>
+                <div style={sideItemValueStyle}>{draftCount}</div>
+              </div>
+              <div style={sideItemStyle}>
+                <div style={sideItemTitleStyle}>Studenten actief</div>
+                <div style={sideItemValueStyle}>{rows.length - lockedCount}</div>
+              </div>
             </div>
           </div>
 
-          {openActions === 0 ? (
-            <div style={emptyStateStyle}>Er staan nu geen open acties klaar.</div>
-          ) : (
+          <div style={panelStyle}>
+            <h2 style={sectionTitleStyle}>Recente cohortactiviteit</h2>
+
             <div style={stackStyle}>
-              {missingReviewAssessments.slice(0, 5).map((a) => {
-                const cohortName =
-                  a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
-
-                return (
-                  <div key={a.id} style={listCardStyle}>
-                    <div style={listCardTitleStyle}>
-                      Beoordeling starten voor {fullName(a.student)}
+              {rows
+                .filter((r) => r.latestAssessment)
+                .sort((a, b) => {
+                  const at = a.latestAssessment
+                    ? new Date(a.latestAssessment.updatedAt).getTime()
+                    : 0;
+                  const bt = b.latestAssessment
+                    ? new Date(b.latestAssessment.updatedAt).getTime()
+                    : 0;
+                  return bt - at;
+                })
+                .slice(0, 6)
+                .map((row) => (
+                  <div key={row.id} style={activityCardStyle}>
+                    <div style={activityCardTitleStyle}>{row.name}</div>
+                    <div style={activityCardMetaStyle}>
+                      {rubricLabel(row.latestAssessment?.rubricKey)}{" "}
+                      {momentLabel(row.latestAssessment?.moment)}
                     </div>
-                    <div style={listCardMetaStyle}>
-                      {cohortName} • {rubricLabel(a.rubricKey)}{" "}
-                      {momentLabel(a.moment)}
-                    </div>
-                    <div style={listCardHintStyle}>
-                      Ingediend op {formatDateTime(a.submittedAt)}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {draftTeacherReviews.slice(0, 5).map((r) => {
-                const cohortName =
-                  r.assessment.student.enrollments[0]?.cohort?.naam ??
-                  "Onbekend cohort";
-
-                return (
-                  <div key={r.id} style={listCardStyle}>
-                    <div style={listCardTitleStyle}>
-                      Concept afronden voor {fullName(r.assessment.student)}
-                    </div>
-                    <div style={listCardMetaStyle}>
-                      {cohortName} • {rubricLabel(r.assessment.rubricKey)}{" "}
-                      {momentLabel(r.assessment.moment)}
-                    </div>
-                    <div style={listCardHintStyle}>
-                      Laatst bijgewerkt op {formatDateTime(r.updatedAt)}
+                    <div style={activityCardDateStyle}>
+                      {formatDateTime(row.latestAssessment?.updatedAt)}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                ))}
 
-        <section style={panelStyle}>
-          <div style={panelHeaderStyle}>
-            <div>
-              <h2 style={sectionTitle}>Studenten die aandacht vragen</h2>
-              <p style={mutedText}>
-                Korte shortlist van studenten waar iets open of actueel is.
-              </p>
+              {rows.filter((r) => r.latestAssessment).length === 0 && (
+                <div style={emptyStateStyle}>Nog geen recente activiteit zichtbaar.</div>
+              )}
             </div>
           </div>
-
-          {studentsNeedingAttention.length === 0 ? (
-            <div style={emptyStateStyle}>
-              Nog geen studenten met zichtbare activiteit of open acties.
-            </div>
-          ) : (
-            <div style={stackStyle}>
-              {studentsNeedingAttention.map((student) => (
-                <div key={student.id} style={listCardStyle}>
-                  <div style={listCardTitleStyle}>{student.name}</div>
-                  <div style={listCardMetaStyle}>{student.cohortName}</div>
-                  <div style={listCardHintStyle}>{student.reason}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <section style={panelStyle}>
-          <div style={panelHeaderStyle}>
-            <div>
-              <h2 style={sectionTitle}>Recente activiteit</h2>
-              <p style={mutedText}>
-                Laatste studentinvoer binnen jouw groepen.
-              </p>
-            </div>
-          </div>
-
-          {recentActivity.length === 0 ? (
-            <div style={emptyStateStyle}>
-              Er is nog geen recente studentactiviteit gevonden.
-            </div>
-          ) : (
-            <div style={stackStyle}>
-              {recentActivity.map((item) => (
-                <div key={item.id} style={activityRowStyle}>
-                  <div style={activityDotStyle} />
-                  <div>
-                    <div style={activityTitleStyle}>{item.title}</div>
-                    <div style={activityMetaStyle}>{item.meta}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       </div>
     </div>
@@ -616,8 +420,23 @@ const pageStyle: CSSProperties = {
   padding: 32,
 };
 
-const heroStyle: CSSProperties = {
+const topBarStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: 16,
   marginBottom: 24,
+};
+
+const crumbsStyle: CSSProperties = {
+  fontSize: 13,
+  color: "#6b7280",
+  marginBottom: 10,
+};
+
+const crumbLinkStyle: CSSProperties = {
+  color: "#374151",
+  textDecoration: "none",
 };
 
 const h1Style: CSSProperties = {
@@ -625,64 +444,70 @@ const h1Style: CSSProperties = {
   fontSize: 32,
 };
 
-const heroTextStyle: CSSProperties = {
+const subTextStyle: CSSProperties = {
   marginTop: 8,
-  marginBottom: 6,
-  color: "#374151",
-  fontSize: 16,
+  marginBottom: 4,
+  color: "#4b5563",
 };
 
-const heroSubtleStyle: CSSProperties = {
-  margin: 0,
+const tinyTextStyle: CSSProperties = {
+  marginTop: 0,
   color: "#6b7280",
-  fontSize: 14,
-  maxWidth: 760,
+  fontSize: 13,
+};
+
+const headerActionWrapStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+};
+
+const backButtonStyle: CSSProperties = {
+  display: "inline-block",
+  padding: "10px 12px",
+  border: "1px solid #e5e7eb",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "#111827",
+  background: "white",
 };
 
 const statsGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
   gap: 16,
   marginBottom: 24,
 };
 
-const topGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "2fr 1fr",
-  gap: 16,
-};
-
-const middleGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 16,
-  marginTop: 16,
-};
-
-const cardStyle: CSSProperties = {
+const statCardStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 16,
   padding: 18,
   background: "white",
 };
 
-const cardLabel: CSSProperties = {
+const statLabelStyle: CSSProperties = {
   fontSize: 13,
   color: "#6b7280",
   marginBottom: 8,
 };
 
-const cardValue: CSSProperties = {
-  fontSize: 30,
+const statValueStyle: CSSProperties = {
+  fontSize: 28,
   fontWeight: 700,
   color: "#111827",
-  lineHeight: 1.1,
 };
 
-const cardHint: CSSProperties = {
-  marginTop: 8,
-  color: "#6b7280",
-  fontSize: 13,
+const contentGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "2fr 1fr",
+  gap: 16,
+};
+
+const sidePanelStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
 };
 
 const panelStyle: CSSProperties = {
@@ -700,16 +525,15 @@ const panelHeaderStyle: CSSProperties = {
   marginBottom: 12,
 };
 
-const sectionTitle: CSSProperties = {
+const sectionTitleStyle: CSSProperties = {
   marginTop: 0,
   marginBottom: 8,
   fontSize: 20,
 };
 
-const mutedText: CSSProperties = {
+const sectionTextStyle: CSSProperties = {
+  margin: 0,
   color: "#6b7280",
-  marginTop: 0,
-  marginBottom: 0,
   fontSize: 14,
 };
 
@@ -721,98 +545,60 @@ const emptyStateStyle: CSSProperties = {
   background: "#fafafa",
 };
 
-const actionListStyle: CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 10,
+const tableWrapStyle: CSSProperties = {
+  overflowX: "auto",
 };
 
-const actionLinkStyle: CSSProperties = {
-  display: "inline-block",
-  padding: "10px 12px",
-  border: "1px solid #e5e7eb",
-  borderRadius: 10,
-  textDecoration: "none",
-  color: "#111827",
-  background: "white",
+const tableStyle: CSSProperties = {
+  width: "100%",
+  borderCollapse: "collapse",
 };
 
-const actionGhostStyle: CSSProperties = {
-  padding: "10px 12px",
-  border: "1px dashed #d1d5db",
-  borderRadius: 10,
-  color: "#6b7280",
-  background: "#fafafa",
-  fontSize: 14,
-};
-
-const groupGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-  gap: 12,
-};
-
-const groupCardLinkStyle: CSSProperties = {
-  textDecoration: "none",
-  color: "inherit",
-  display: "block",
-};
-
-const groupCardStyle: CSSProperties = {
-  border: "1px solid #e5e7eb",
-  borderRadius: 14,
-  padding: 16,
-  background: "#fff",
-  height: "100%",
-};
-
-const groupTitleStyle: CSSProperties = {
-  fontSize: 18,
-  fontWeight: 700,
-  marginBottom: 6,
-  color: "#111827",
-};
-
-const groupMetaStyle: CSSProperties = {
-  color: "#6b7280",
-  fontSize: 14,
-  marginBottom: 12,
-};
-
-const groupStatsRowStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-  gap: 10,
-};
-
-const miniStatStyle: CSSProperties = {
-  border: "1px solid #f0f0f0",
-  borderRadius: 12,
-  padding: 10,
+const theadRowStyle: CSSProperties = {
   background: "#fafafa",
 };
 
-const miniStatValueStyle: CSSProperties = {
-  fontSize: 20,
-  fontWeight: 700,
-  color: "#111827",
-};
-
-const miniStatLabelStyle: CSSProperties = {
+const thStyle: CSSProperties = {
+  textAlign: "left",
+  padding: "12px 10px",
   fontSize: 12,
   color: "#6b7280",
-  marginTop: 4,
+  borderBottom: "1px solid #e5e7eb",
 };
 
-const groupFooterStyle: CSSProperties = {
-  marginTop: 14,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 10,
+const tdStyle: CSSProperties = {
+  padding: "14px 10px",
+  verticalAlign: "top",
+  borderBottom: "1px solid #f1f5f9",
 };
 
-const softBadgeStyle: CSSProperties = {
+const nameStyle: CSSProperties = {
+  fontWeight: 700,
+  color: "#111827",
+  marginBottom: 4,
+};
+
+const emailStyle: CSSProperties = {
+  fontSize: 13,
+  color: "#6b7280",
+};
+
+const activityMainStyle: CSSProperties = {
+  color: "#111827",
+  fontWeight: 600,
+};
+
+const activitySubStyle: CSSProperties = {
+  color: "#6b7280",
+  fontSize: 13,
+  marginTop: 3,
+};
+
+const mutedInlineStyle: CSSProperties = {
+  color: "#9ca3af",
+};
+
+const lockedPillStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   borderRadius: 999,
@@ -822,8 +608,98 @@ const softBadgeStyle: CSSProperties = {
   color: "#374151",
 };
 
-const groupOpenStyle: CSSProperties = {
+const openPillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "6px 10px",
+  fontSize: 12,
+  background: "#111827",
+  color: "white",
+};
+
+function statusPillStyle(kind: "open" | "draft" | "done" | "idle"): CSSProperties {
+  if (kind === "open") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "6px 10px",
+      fontSize: 12,
+      background: "#111827",
+      color: "white",
+    };
+  }
+
+  if (kind === "draft") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "6px 10px",
+      fontSize: 12,
+      background: "#e5e7eb",
+      color: "#111827",
+    };
+  }
+
+  if (kind === "done") {
+    return {
+      display: "inline-flex",
+      alignItems: "center",
+      borderRadius: 999,
+      padding: "6px 10px",
+      fontSize: 12,
+      background: "#f3f4f6",
+      color: "#374151",
+    };
+  }
+
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    borderRadius: 999,
+    padding: "6px 10px",
+    fontSize: 12,
+    background: "#fafafa",
+    color: "#6b7280",
+    border: "1px solid #e5e7eb",
+  };
+}
+
+const actionColStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const tableLinkStyle: CSSProperties = {
+  color: "#111827",
+  textDecoration: "none",
+  fontWeight: 600,
+};
+
+const sideListStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const sideItemStyle: CSSProperties = {
+  border: "1px solid #f0f0f0",
+  borderRadius: 12,
+  padding: 12,
+  background: "#fafafa",
+};
+
+const sideItemTitleStyle: CSSProperties = {
   fontSize: 13,
+  color: "#6b7280",
+  marginBottom: 6,
+};
+
+const sideItemValueStyle: CSSProperties = {
+  fontSize: 24,
   fontWeight: 700,
   color: "#111827",
 };
@@ -834,53 +710,26 @@ const stackStyle: CSSProperties = {
   gap: 10,
 };
 
-const listCardStyle: CSSProperties = {
+const activityCardStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 12,
-  padding: 14,
-  background: "#fff",
+  padding: 12,
+  background: "white",
 };
 
-const listCardTitleStyle: CSSProperties = {
+const activityCardTitleStyle: CSSProperties = {
   fontWeight: 700,
   color: "#111827",
   marginBottom: 4,
 };
 
-const listCardMetaStyle: CSSProperties = {
-  color: "#374151",
+const activityCardMetaStyle: CSSProperties = {
   fontSize: 14,
+  color: "#374151",
   marginBottom: 4,
 };
 
-const listCardHintStyle: CSSProperties = {
-  color: "#6b7280",
+const activityCardDateStyle: CSSProperties = {
   fontSize: 13,
-};
-
-const activityRowStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "flex-start",
-  gap: 10,
-  padding: "8px 0",
-};
-
-const activityDotStyle: CSSProperties = {
-  width: 10,
-  height: 10,
-  borderRadius: 999,
-  background: "#111827",
-  marginTop: 6,
-  flexShrink: 0,
-};
-
-const activityTitleStyle: CSSProperties = {
-  fontWeight: 600,
-  color: "#111827",
-};
-
-const activityMetaStyle: CSSProperties = {
   color: "#6b7280",
-  fontSize: 13,
-  marginTop: 2,
 };

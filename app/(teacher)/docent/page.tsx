@@ -275,8 +275,7 @@ export default async function DocentDashboardPage() {
   const openActions = actionableAssessmentIds.size;
 
   const recentActivity = submittedAssessments.slice(0, 6).map((a) => {
-    const cohortName =
-      a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
+    const cohortName = a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
     return {
       id: a.id,
       title: `${fullName(a.student)} heeft ${rubricLabel(a.rubricKey)} ${momentLabel(a.moment)} ingediend`,
@@ -287,8 +286,7 @@ export default async function DocentDashboardPage() {
   const studentsNeedingAttention = students
     .map((student) => {
       const latest = student.assessments[0] ?? null;
-      const cohortName =
-        student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
+      const cohortName = student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
 
       const latestSubmittedWithoutReview = student.assessments.find(
         (a) => a.submittedAt && a.teacherReviews.length === 0
@@ -428,35 +426,43 @@ export default async function DocentDashboardPage() {
           ) : (
             <div style={groupGridStyle}>
               {cohortCards.map((c) => (
-                <div key={c.id} style={groupCardStyle}>
-                  <div style={groupTitleStyle}>{c.naam}</div>
-                  <div style={groupMetaStyle}>
-                    {c.traject} • uitvoering {c.uitvoeringId}
-                  </div>
+                <Link
+                  key={c.id}
+                  href={`/docent/cohort/${c.id}`}
+                  style={groupCardLinkStyle}
+                >
+                  <div style={groupCardStyle}>
+                    <div style={groupTitleStyle}>{c.naam}</div>
+                    <div style={groupMetaStyle}>
+                      {c.traject} • uitvoering {c.uitvoeringId}
+                    </div>
 
-                  <div style={groupStatsRowStyle}>
-                    <div style={miniStatStyle}>
-                      <div style={miniStatValueStyle}>{c.studentCount}</div>
-                      <div style={miniStatLabelStyle}>studenten</div>
+                    <div style={groupStatsRowStyle}>
+                      <div style={miniStatStyle}>
+                        <div style={miniStatValueStyle}>{c.studentCount}</div>
+                        <div style={miniStatLabelStyle}>studenten</div>
+                      </div>
+                      <div style={miniStatStyle}>
+                        <div style={miniStatValueStyle}>{c.teacherCount}</div>
+                        <div style={miniStatLabelStyle}>docenten</div>
+                      </div>
+                      <div style={miniStatStyle}>
+                        <div style={miniStatValueStyle}>{c.openCount}</div>
+                        <div style={miniStatLabelStyle}>open</div>
+                      </div>
                     </div>
-                    <div style={miniStatStyle}>
-                      <div style={miniStatValueStyle}>{c.teacherCount}</div>
-                      <div style={miniStatLabelStyle}>docenten</div>
-                    </div>
-                    <div style={miniStatStyle}>
-                      <div style={miniStatValueStyle}>{c.openCount}</div>
-                      <div style={miniStatLabelStyle}>open</div>
-                    </div>
-                  </div>
 
-                  <div style={groupFooterStyle}>
-                    <span style={softBadgeStyle}>
-                      {c.openCount > 0
-                        ? `${c.openCount} studenten nog actief`
-                        : "Geen open studentslots"}
-                    </span>
+                    <div style={groupFooterStyle}>
+                      <span style={softBadgeStyle}>
+                        {c.openCount > 0
+                          ? `${c.openCount} studenten nog actief`
+                          : "Geen open studentslots"}
+                      </span>
+
+                      <span style={groupOpenStyle}>Open groep →</span>
+                    </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -746,11 +752,18 @@ const groupGridStyle: CSSProperties = {
   gap: 12,
 };
 
+const groupCardLinkStyle: CSSProperties = {
+  textDecoration: "none",
+  color: "inherit",
+  display: "block",
+};
+
 const groupCardStyle: CSSProperties = {
   border: "1px solid #e5e7eb",
   borderRadius: 14,
   padding: 16,
   background: "#fff",
+  height: "100%",
 };
 
 const groupTitleStyle: CSSProperties = {
@@ -796,6 +809,7 @@ const groupFooterStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
+  gap: 10,
 };
 
 const softBadgeStyle: CSSProperties = {
@@ -806,6 +820,12 @@ const softBadgeStyle: CSSProperties = {
   fontSize: 12,
   background: "#f3f4f6",
   color: "#374151",
+};
+
+const groupOpenStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#111827",
 };
 
 const stackStyle: CSSProperties = {
