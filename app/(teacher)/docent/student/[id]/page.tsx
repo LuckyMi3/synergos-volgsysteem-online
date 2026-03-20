@@ -1,18 +1,42 @@
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import StudentAssessment from "./StudentAssessment";
 
 type Props = {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 };
 
+function fullName(student: {
+  voornaam: string;
+  tussenvoegsel: string | null;
+  achternaam: string;
+}) {
+  return [student.voornaam, student.tussenvoegsel, student.achternaam]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+}
+
 export default async function StudentPage({ params }: Props) {
+  const { id } = await params;
+
   const student = await prisma.user.findUnique({
-    where: { id: params.id },
-    include: {
+    where: { id },
+    select: {
+      id: true,
+      email: true,
+      voornaam: true,
+      tussenvoegsel: true,
+      achternaam: true,
       enrollments: {
-        include: {
-          cohort: true,
+        select: {
+          id: true,
+          cohort: {
+            select: {
+              id: true,
+              naam: true,
+            },
+          },
         },
       },
     },
@@ -22,13 +46,10 @@ export default async function StudentPage({ params }: Props) {
 
   return (
     <div className="max-w-6xl mx-auto p-8 space-y-8">
-
-      {/* HEADER */}
       <section className="bg-white border rounded-xl p-6 shadow-sm">
         <div className="flex flex-col gap-2">
-
           <h1 className="text-2xl font-bold">
-            {student.name ?? "Onbekende student"}
+            {fullName(student) || "Onbekende student"}
           </h1>
 
           <div className="flex flex-wrap gap-2 mt-2">
@@ -41,15 +62,10 @@ export default async function StudentPage({ params }: Props) {
               </span>
             ))}
           </div>
-
         </div>
       </section>
 
-      {/* VOLGSYSTEEM */}
-      <StudentAssessment
-        studentId={student.id}
-      />
-
+      <StudentAssessment studentId={student.id} />
     </div>
   );
 }
