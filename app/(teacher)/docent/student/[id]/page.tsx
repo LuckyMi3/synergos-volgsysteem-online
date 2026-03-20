@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import StudentAssessment from "./StudentAssessment";
 
 type Props = {
@@ -25,23 +26,14 @@ function getRubricKeyFromCohortNames(cohortNames: string[]): string {
   const normalizedNames = cohortNames.map(normalizeText);
 
   const hasMatch = (patterns: string[]) =>
-    normalizedNames.some((name) => patterns.some((pattern) => name.includes(pattern)));
+    normalizedNames.some((name) =>
+      patterns.some((pattern) => name.includes(pattern))
+    );
 
-  if (hasMatch(["3vo", "jaar3", "leerjaar3", "derdejaar"])) {
-    return "3vo";
-  }
-
-  if (hasMatch(["2vo", "jaar2", "leerjaar2", "tweedejaar"])) {
-    return "2vo";
-  }
-
-  if (hasMatch(["1vo", "jaar1", "leerjaar1", "eerstejaar"])) {
-    return "1vo";
-  }
-
-  if (hasMatch(["basisjaar", "basis"])) {
-    return "basisjaar";
-  }
+  if (hasMatch(["3vo", "jaar3", "leerjaar3"])) return "3vo";
+  if (hasMatch(["2vo", "jaar2", "leerjaar2"])) return "2vo";
+  if (hasMatch(["1vo", "jaar1", "leerjaar1"])) return "1vo";
+  if (hasMatch(["basisjaar", "basis"])) return "basisjaar";
 
   return "1vo";
 }
@@ -77,7 +69,18 @@ export default async function StudentPage({ params }: Props) {
   const rubricKey = getRubricKeyFromCohortNames(cohortNames);
 
   return (
-    <div className="max-w-6xl mx-auto p-8 space-y-8">
+    <div className="max-w-6xl mx-auto p-8 space-y-6">
+
+      {/* terugknop */}
+      <div>
+        <Link
+          href="/docent"
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+        >
+          ← Terug naar overzicht
+        </Link>
+      </div>
+
       <section className="bg-white border rounded-xl p-6 shadow-sm">
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-bold">
@@ -98,6 +101,7 @@ export default async function StudentPage({ params }: Props) {
       </section>
 
       <StudentAssessment studentId={student.id} rubricKey={rubricKey} />
+
     </div>
   );
 }
