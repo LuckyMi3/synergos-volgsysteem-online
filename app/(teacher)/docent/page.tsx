@@ -60,10 +60,9 @@ function momentLabel(moment: string | null | undefined) {
 }
 
 function buildStudentLink(studentId: string, moment?: string | null) {
-  if (!moment) return `/docent/student/${studentId}`;
-  return `/docent/student/${studentId}?moment=${encodeURIComponent(
-    String(moment).toUpperCase()
-  )}`;
+  const base = `/docent/student/${studentId}`;
+  if (!moment) return base;
+  return `${base}?moment=${encodeURIComponent(String(moment).toUpperCase())}`;
 }
 
 export default async function DocentDashboardPage() {
@@ -428,8 +427,7 @@ export default async function DocentDashboardPage() {
           <h1 style={h1Style}>Docentdashboard</h1>
           <p style={heroTextStyle}>Welkom, {fullName(teacher)}</p>
           <p style={heroSubtleStyle}>
-            Dit is je werkstartscherm: groepen, open beoordelingen en recente
-            studentactiviteit in één overzicht.
+            Dit is je werkstartscherm: focus op wat nu aandacht vraagt.
           </p>
         </div>
 
@@ -529,9 +527,9 @@ export default async function DocentDashboardPage() {
           )}
         </section>
 
-        <section style={panelStyle}>
-          <h2 style={sectionTitle}>Snelle acties</h2>
-          <div style={actionListStyle}>
+        <details style={accordionStyle}>
+          <summary style={accordionSummaryStyle}>Snelle acties</summary>
+          <div style={accordionContentStyle}>
             <Link href="/docent" style={actionLinkStyle}>
               Dashboard verversen
             </Link>
@@ -557,80 +555,111 @@ export default async function DocentDashboardPage() {
                 : "Geen open conceptfeedback"}
             </div>
           </div>
-        </section>
+        </details>
       </div>
 
-      <div style={middleGridStyle}>
-        <section style={panelStyle}>
-          <div style={panelHeaderStyle}>
-            <div>
-              <h2 style={sectionTitle}>Open acties</h2>
-              <p style={mutedText}>
-                Werk dat nu direct jouw aandacht vraagt.
-              </p>
+      <div style={mainGridStyle}>
+        <div style={leftColumnStyle}>
+          <section style={panelStyle}>
+            <div style={panelHeaderStyle}>
+              <div>
+                <h2 style={sectionTitle}>Open acties</h2>
+                <p style={mutedText}>
+                  Werk dat nu direct jouw aandacht vraagt.
+                </p>
+              </div>
             </div>
-          </div>
 
-          {openActions === 0 ? (
-            <div style={emptyStateStyle}>Er staan nu geen open acties klaar.</div>
-          ) : (
-            <div style={stackStyle}>
-              {missingReviewAssessments.slice(0, 5).map((a) => {
-                const cohortName =
-                  a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
+            {openActions === 0 ? (
+              <div style={emptyStateStyle}>Er staan nu geen open acties klaar.</div>
+            ) : (
+              <div style={stackStyle}>
+                {missingReviewAssessments.slice(0, 5).map((a) => {
+                  const cohortName =
+                    a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
 
-                return (
-                  <Link
-                    key={a.id}
-                    href={buildStudentLink(a.student.id, a.moment)}
-                    style={listCardLinkStyle}
-                  >
-                    <div style={priorityBadgeRedStyle}>Nieuw ingediend</div>
-                    <div style={listCardTitleStyle}>
-                      Beoordeling starten voor {fullName(a.student)}
-                    </div>
-                    <div style={listCardMetaStyle}>
-                      {cohortName} • {rubricLabel(a.rubricKey)}{" "}
-                      {momentLabel(a.moment)}
-                    </div>
-                    <div style={listCardHintStyle}>
-                      Ingediend op {formatDateTime(a.submittedAt)}
+                  return (
+                    <Link
+                      key={a.id}
+                      href={buildStudentLink(a.student.id, a.moment)}
+                      style={listCardLinkStyle}
+                    >
+                      <div style={priorityBadgeRedStyle}>Nieuw ingediend</div>
+                      <div style={listCardTitleStyle}>
+                        Beoordeling starten voor {fullName(a.student)}
+                      </div>
+                      <div style={listCardMetaStyle}>
+                        {cohortName} • {rubricLabel(a.rubricKey)}{" "}
+                        {momentLabel(a.moment)}
+                      </div>
+                      <div style={listCardHintStyle}>
+                        Ingediend op {formatDateTime(a.submittedAt)}
+                      </div>
+                    </Link>
+                  );
+                })}
+
+                {draftTeacherReviews.slice(0, 5).map((r) => {
+                  const cohortName =
+                    r.assessment.student.enrollments[0]?.cohort?.naam ??
+                    "Onbekend cohort";
+
+                  return (
+                    <Link
+                      key={r.id}
+                      href={buildStudentLink(
+                        r.assessment.student.id,
+                        r.assessment.moment
+                      )}
+                      style={listCardLinkStyle}
+                    >
+                      <div style={priorityBadgeOrangeStyle}>Concept open</div>
+                      <div style={listCardTitleStyle}>
+                        Concept afronden voor {fullName(r.assessment.student)}
+                      </div>
+                      <div style={listCardMetaStyle}>
+                        {cohortName} • {rubricLabel(r.assessment.rubricKey)}{" "}
+                        {momentLabel(r.assessment.moment)}
+                      </div>
+                      <div style={listCardHintStyle}>
+                        Laatst bijgewerkt op {formatDateTime(r.updatedAt)}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section style={panelStyle}>
+            <div style={panelHeaderStyle}>
+              <div>
+                <h2 style={sectionTitle}>Recente activiteit</h2>
+                <p style={mutedText}>
+                  Laatste studentinvoer binnen jouw groepen.
+                </p>
+              </div>
+            </div>
+
+            {recentActivity.length === 0 ? (
+              <div style={emptyStateStyle}>
+                Er is nog geen recente studentactiviteit gevonden.
+              </div>
+            ) : (
+              <div style={stackStyle}>
+                {recentActivity.map((item) => (
+                  <Link key={item.id} href={item.href} style={activityLinkStyle}>
+                    <div style={activityDotStyle} />
+                    <div>
+                      <div style={activityTitleStyle}>{item.title}</div>
+                      <div style={activityMetaStyle}>{item.meta}</div>
                     </div>
                   </Link>
-                );
-              })}
-
-              {draftTeacherReviews.slice(0, 5).map((r) => {
-                const cohortName =
-                  r.assessment.student.enrollments[0]?.cohort?.naam ??
-                  "Onbekend cohort";
-
-                return (
-                  <Link
-                    key={r.id}
-                    href={buildStudentLink(
-                      r.assessment.student.id,
-                      r.assessment.moment
-                    )}
-                    style={listCardLinkStyle}
-                  >
-                    <div style={priorityBadgeOrangeStyle}>Concept open</div>
-                    <div style={listCardTitleStyle}>
-                      Concept afronden voor {fullName(r.assessment.student)}
-                    </div>
-                    <div style={listCardMetaStyle}>
-                      {cohortName} • {rubricLabel(r.assessment.rubricKey)}{" "}
-                      {momentLabel(r.assessment.moment)}
-                    </div>
-                    <div style={listCardHintStyle}>
-                      Laatst bijgewerkt op {formatDateTime(r.updatedAt)}
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
 
         <section style={panelStyle}>
           <div style={panelHeaderStyle}>
@@ -672,37 +701,6 @@ export default async function DocentDashboardPage() {
                   <div style={listCardTitleStyle}>{student.name}</div>
                   <div style={listCardMetaStyle}>{student.cohortName}</div>
                   <div style={listCardHintStyle}>{student.reason}</div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <section style={panelStyle}>
-          <div style={panelHeaderStyle}>
-            <div>
-              <h2 style={sectionTitle}>Recente activiteit</h2>
-              <p style={mutedText}>
-                Laatste studentinvoer binnen jouw groepen.
-              </p>
-            </div>
-          </div>
-
-          {recentActivity.length === 0 ? (
-            <div style={emptyStateStyle}>
-              Er is nog geen recente studentactiviteit gevonden.
-            </div>
-          ) : (
-            <div style={stackStyle}>
-              {recentActivity.map((item) => (
-                <Link key={item.id} href={item.href} style={activityLinkStyle}>
-                  <div style={activityDotStyle} />
-                  <div>
-                    <div style={activityTitleStyle}>{item.title}</div>
-                    <div style={activityMetaStyle}>{item.meta}</div>
-                  </div>
                 </Link>
               ))}
             </div>
@@ -796,13 +794,20 @@ const topGridStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "2fr 1fr",
   gap: 16,
+  marginBottom: 16,
 };
 
-const middleGridStyle: CSSProperties = {
+const mainGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
+  gridTemplateColumns: "2fr 1fr",
   gap: 16,
-  marginTop: 16,
+  alignItems: "start",
+};
+
+const leftColumnStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 16,
 };
 
 const cardStyle: CSSProperties = {
@@ -867,7 +872,23 @@ const emptyStateStyle: CSSProperties = {
   background: "#fafafa",
 };
 
-const actionListStyle: CSSProperties = {
+const accordionStyle: CSSProperties = {
+  border: "1px solid #e5e7eb",
+  borderRadius: 16,
+  padding: 20,
+  background: "white",
+};
+
+const accordionSummaryStyle: CSSProperties = {
+  cursor: "pointer",
+  fontSize: 20,
+  fontWeight: 700,
+  color: "#111827",
+  listStyle: "none",
+};
+
+const accordionContentStyle: CSSProperties = {
+  marginTop: 14,
   display: "flex",
   flexDirection: "column",
   gap: 10,
