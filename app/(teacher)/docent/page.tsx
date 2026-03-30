@@ -59,6 +59,13 @@ function momentLabel(moment: string | null | undefined) {
   return String(moment).toUpperCase();
 }
 
+function buildStudentLink(studentId: string, moment?: string | null) {
+  if (!moment) return `/docent/student/${studentId}`;
+  return `/docent/student/${studentId}?moment=${encodeURIComponent(
+    String(moment).toUpperCase()
+  )}`;
+}
+
 export default async function DocentDashboardPage() {
   const userId = await getSessionUserId();
 
@@ -278,8 +285,11 @@ export default async function DocentDashboardPage() {
     const cohortName = a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
     return {
       id: a.id,
+      studentId: a.student.id,
+      moment: a.moment,
       title: `${fullName(a.student)} heeft ${rubricLabel(a.rubricKey)} ${momentLabel(a.moment)} ingediend`,
       meta: `${cohortName} • ${formatDateTime(a.submittedAt)}`,
+      href: buildStudentLink(a.student.id, a.moment),
     };
   });
 
@@ -299,6 +309,7 @@ export default async function DocentDashboardPage() {
       let reason = "";
       let sortScore = 0;
       let updatedAt: Date | null = null;
+      let href = `/docent/student/${student.id}`;
 
       if (latestSubmittedWithoutReview) {
         reason = `Nieuwe studentinvoer wacht op beoordeling • ${rubricLabel(
@@ -308,16 +319,19 @@ export default async function DocentDashboardPage() {
         updatedAt =
           latestSubmittedWithoutReview.submittedAt ??
           latestSubmittedWithoutReview.updatedAt;
+        href = buildStudentLink(student.id, latestSubmittedWithoutReview.moment);
       } else if (latestDraft) {
         reason = `Conceptfeedback staat nog open • ${rubricLabel(
           latestDraft.rubricKey
         )} ${momentLabel(latestDraft.moment)}`;
         sortScore = 2;
         updatedAt = latestDraft.updatedAt;
+        href = buildStudentLink(student.id, latestDraft.moment);
       } else if (latest) {
         reason = `Laatste activiteit op ${formatDate(latest.updatedAt)}`;
         sortScore = 1;
         updatedAt = latest.updatedAt;
+        href = buildStudentLink(student.id, latest.moment);
       } else {
         reason = "Nog geen assessmentactiviteit zichtbaar";
         sortScore = 0;
@@ -331,6 +345,7 @@ export default async function DocentDashboardPage() {
         reason,
         sortScore,
         updatedAt,
+        href,
       };
     })
     .sort((a, b) => {
@@ -363,6 +378,43 @@ export default async function DocentDashboardPage() {
     };
   });
 
+  const nextAction =
+    missingReviewAssessments[0] != null
+      ? {
+          title: `Start beoordeling voor ${fullName(
+            missingReviewAssessments[0].student
+          )}`,
+          subtitle: `${rubricLabel(
+            missingReviewAssessments[0].rubricKey
+          )} ${momentLabel(missingReviewAssessments[0].moment)} • ${
+            missingReviewAssessments[0].student.enrollments[0]?.cohort?.naam ??
+            "Onbekend cohort"
+          }`,
+          href: buildStudentLink(
+            missingReviewAssessments[0].student.id,
+            missingReviewAssessments[0].moment
+          ),
+          badge: "Nieuw ingediend",
+        }
+      : draftTeacherReviews[0] != null
+      ? {
+          title: `Ga verder met ${fullName(
+            draftTeacherReviews[0].assessment.student
+          )}`,
+          subtitle: `${rubricLabel(
+            draftTeacherReviews[0].assessment.rubricKey
+          )} ${momentLabel(draftTeacherReviews[0].assessment.moment)} • ${
+            draftTeacherReviews[0].assessment.student.enrollments[0]?.cohort
+              ?.naam ?? "Onbekend cohort"
+          }`,
+          href: buildStudentLink(
+            draftTeacherReviews[0].assessment.student.id,
+            draftTeacherReviews[0].assessment.moment
+          ),
+          badge: "Concept open",
+        }
+      : null;
+
   const groupCount = cohortCards.length;
   const studentCount = students.length;
   const recentUpdates = recentActivity.length;
@@ -380,6 +432,15 @@ export default async function DocentDashboardPage() {
             studentactiviteit in één overzicht.
           </p>
         </div>
+
+        {nextAction ? (
+          <Link href={nextAction.href} style={nextActionCardStyle}>
+            <div style={nextActionBadgeStyle}>{nextAction.badge}</div>
+            <div style={nextActionTitleStyle}>{nextAction.title}</div>
+            <div style={nextActionSubtitleStyle}>{nextAction.subtitle}</div>
+            <div style={nextActionLinkStyle}>Direct openen →</div>
+          </Link>
+        ) : null}
       </div>
 
       <div style={statsGridStyle}>
@@ -474,9 +535,17 @@ export default async function DocentDashboardPage() {
             <Link href="/docent" style={actionLinkStyle}>
               Dashboard verversen
             </Link>
+
+            {nextAction ? (
+              <Link href={nextAction.href} style={actionPrimaryLinkStyle}>
+                {nextAction.badge}: {nextAction.title}
+              </Link>
+            ) : null}
+
             <Link href="/login" style={actionLinkStyle}>
               Wissel van account
             </Link>
+
             <div style={actionGhostStyle}>
               {waitingCount > 0
                 ? `${waitingCount} ingediende assessments wachten nog op jouw review`
@@ -511,7 +580,12 @@ export default async function DocentDashboardPage() {
                   a.student.enrollments[0]?.cohort?.naam ?? "Onbekend cohort";
 
                 return (
-                  <div key={a.id} style={listCardStyle}>
+                  <Link
+                    key={a.id}
+                    href={buildStudentLink(a.student.id, a.moment)}
+                    style={listCardLinkStyle}
+                  >
+                    <div style={priorityBadgeRedStyle}>Nieuw ingediend</div>
                     <div style={listCardTitleStyle}>
                       Beoordeling starten voor {fullName(a.student)}
                     </div>
@@ -522,7 +596,7 @@ export default async function DocentDashboardPage() {
                     <div style={listCardHintStyle}>
                       Ingediend op {formatDateTime(a.submittedAt)}
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
 
@@ -532,7 +606,15 @@ export default async function DocentDashboardPage() {
                   "Onbekend cohort";
 
                 return (
-                  <div key={r.id} style={listCardStyle}>
+                  <Link
+                    key={r.id}
+                    href={buildStudentLink(
+                      r.assessment.student.id,
+                      r.assessment.moment
+                    )}
+                    style={listCardLinkStyle}
+                  >
+                    <div style={priorityBadgeOrangeStyle}>Concept open</div>
                     <div style={listCardTitleStyle}>
                       Concept afronden voor {fullName(r.assessment.student)}
                     </div>
@@ -543,7 +625,7 @@ export default async function DocentDashboardPage() {
                     <div style={listCardHintStyle}>
                       Laatst bijgewerkt op {formatDateTime(r.updatedAt)}
                     </div>
-                  </div>
+                  </Link>
                 );
               })}
             </div>
@@ -567,11 +649,30 @@ export default async function DocentDashboardPage() {
           ) : (
             <div style={stackStyle}>
               {studentsNeedingAttention.map((student) => (
-                <div key={student.id} style={listCardStyle}>
+                <Link
+                  key={student.id}
+                  href={student.href}
+                  style={listCardLinkStyle}
+                >
+                  <div
+                    style={
+                      student.sortScore >= 3
+                        ? priorityBadgeRedStyle
+                        : student.sortScore >= 2
+                        ? priorityBadgeOrangeStyle
+                        : priorityBadgeGrayStyle
+                    }
+                  >
+                    {student.sortScore >= 3
+                      ? "Nu oppakken"
+                      : student.sortScore >= 2
+                      ? "Verdergaan"
+                      : "Bekijk student"}
+                  </div>
                   <div style={listCardTitleStyle}>{student.name}</div>
                   <div style={listCardMetaStyle}>{student.cohortName}</div>
                   <div style={listCardHintStyle}>{student.reason}</div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -596,13 +697,13 @@ export default async function DocentDashboardPage() {
           ) : (
             <div style={stackStyle}>
               {recentActivity.map((item) => (
-                <div key={item.id} style={activityRowStyle}>
+                <Link key={item.id} href={item.href} style={activityLinkStyle}>
                   <div style={activityDotStyle} />
                   <div>
                     <div style={activityTitleStyle}>{item.title}</div>
                     <div style={activityMetaStyle}>{item.meta}</div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}
@@ -618,6 +719,10 @@ const pageStyle: CSSProperties = {
 
 const heroStyle: CSSProperties = {
   marginBottom: 24,
+  display: "grid",
+  gridTemplateColumns: "1.5fr 1fr",
+  gap: 16,
+  alignItems: "stretch",
 };
 
 const h1Style: CSSProperties = {
@@ -637,6 +742,47 @@ const heroSubtleStyle: CSSProperties = {
   color: "#6b7280",
   fontSize: 14,
   maxWidth: 760,
+};
+
+const nextActionCardStyle: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "center",
+  gap: 8,
+  border: "1px solid #d1fae5",
+  borderRadius: 16,
+  padding: 18,
+  background: "#ecfdf5",
+  textDecoration: "none",
+  color: "#111827",
+};
+
+const nextActionBadgeStyle: CSSProperties = {
+  display: "inline-flex",
+  width: "fit-content",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "6px 10px",
+  fontSize: 12,
+  fontWeight: 700,
+  background: "#d1fae5",
+  color: "#065f46",
+};
+
+const nextActionTitleStyle: CSSProperties = {
+  fontSize: 18,
+  fontWeight: 700,
+};
+
+const nextActionSubtitleStyle: CSSProperties = {
+  fontSize: 14,
+  color: "#374151",
+};
+
+const nextActionLinkStyle: CSSProperties = {
+  marginTop: 4,
+  fontSize: 14,
+  fontWeight: 700,
 };
 
 const statsGridStyle: CSSProperties = {
@@ -737,6 +883,17 @@ const actionLinkStyle: CSSProperties = {
   background: "white",
 };
 
+const actionPrimaryLinkStyle: CSSProperties = {
+  display: "inline-block",
+  padding: "10px 12px",
+  border: "1px solid #86efac",
+  borderRadius: 10,
+  textDecoration: "none",
+  color: "#166534",
+  background: "#ecfdf5",
+  fontWeight: 700,
+};
+
 const actionGhostStyle: CSSProperties = {
   padding: "10px 12px",
   border: "1px dashed #d1d5db",
@@ -834,11 +991,14 @@ const stackStyle: CSSProperties = {
   gap: 10,
 };
 
-const listCardStyle: CSSProperties = {
+const listCardLinkStyle: CSSProperties = {
+  display: "block",
   border: "1px solid #e5e7eb",
   borderRadius: 12,
   padding: 14,
   background: "#fff",
+  textDecoration: "none",
+  color: "inherit",
 };
 
 const listCardTitleStyle: CSSProperties = {
@@ -858,11 +1018,49 @@ const listCardHintStyle: CSSProperties = {
   fontSize: 13,
 };
 
-const activityRowStyle: CSSProperties = {
+const priorityBadgeRedStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "4px 8px",
+  fontSize: 11,
+  fontWeight: 700,
+  background: "#fee2e2",
+  color: "#991b1b",
+  marginBottom: 8,
+};
+
+const priorityBadgeOrangeStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "4px 8px",
+  fontSize: 11,
+  fontWeight: 700,
+  background: "#ffedd5",
+  color: "#9a3412",
+  marginBottom: 8,
+};
+
+const priorityBadgeGrayStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  borderRadius: 999,
+  padding: "4px 8px",
+  fontSize: 11,
+  fontWeight: 700,
+  background: "#f3f4f6",
+  color: "#374151",
+  marginBottom: 8,
+};
+
+const activityLinkStyle: CSSProperties = {
   display: "flex",
   alignItems: "flex-start",
   gap: 10,
   padding: "8px 0",
+  textDecoration: "none",
+  color: "inherit",
 };
 
 const activityDotStyle: CSSProperties = {

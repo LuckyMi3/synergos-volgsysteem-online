@@ -105,19 +105,25 @@ export default function StudentAssessment({
   studentId,
   rubricKey,
   teacherId,
+  initialMoment = "M1",
 }: {
   studentId: string;
   rubricKey: string;
   teacherId: string;
+  initialMoment?: Moment;
 }) {
   const moments: Moment[] = useMemo(() => ["M1", "M2", "M3"], []);
   const rubric = useMemo(() => getRubric(rubricKey), [rubricKey]);
 
-  const [moment, setMoment] = useState<Moment>("M1");
+  const [moment, setMoment] = useState<Moment>(initialMoment);
   const [assessmentId, setAssessmentId] = useState<string>("");
-  const [reviewStatus, setReviewStatus] = useState<"DRAFT" | "PUBLISHED" | "NONE">("NONE");
+  const [reviewStatus, setReviewStatus] = useState<
+    "DRAFT" | "PUBLISHED" | "NONE"
+  >("NONE");
   const [generalFeedback, setGeneralFeedback] = useState("");
-  const [studentScores, setStudentScores] = useState<Record<string, BundleScore>>({});
+  const [studentScores, setStudentScores] = useState<
+    Record<string, BundleScore>
+  >({});
   const [teacherScores, setTeacherScores] = useState<
     Record<string, { correctedScore: number | null; feedback: string }>
   >({});
@@ -125,12 +131,18 @@ export default function StudentAssessment({
   const [status, setStatus] = useState<string>("Laden...");
   const [loading, setLoading] = useState<boolean>(true);
 
-  const questionTimers = useRef<Record<string, ReturnType<typeof setTimeout> | null>>({});
+  const questionTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout> | null>
+  >({});
   const reviewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const min = Number(rubric?.scale?.min ?? 0);
   const max = Number(rubric?.scale?.max ?? 10);
   const mid = defaultValueForRubric(rubric);
+
+  useEffect(() => {
+    setMoment(initialMoment);
+  }, [initialMoment]);
 
   async function ensureAssessment(activeMoment: Moment) {
     const res = await fetch("/api/assessments/ensure", {
@@ -196,7 +208,10 @@ export default function StudentAssessment({
       }
       setStudentScores(nextStudentScores);
 
-      const nextTeacherScores: Record<string, { correctedScore: number | null; feedback: string }> = {};
+      const nextTeacherScores: Record<
+        string,
+        { correctedScore: number | null; feedback: string }
+      > = {};
       for (const row of bundle?.teacherScores ?? []) {
         nextTeacherScores[rowKey(row.themeId, row.questionId)] = {
           correctedScore: row.correctedScore,
@@ -541,7 +556,8 @@ export default function StudentAssessment({
                               setTeacherScores((prev) => ({
                                 ...prev,
                                 [key]: {
-                                  correctedScore: prev[key]?.correctedScore ?? studentValue,
+                                  correctedScore:
+                                    prev[key]?.correctedScore ?? studentValue,
                                   feedback: value,
                                 },
                               }));
