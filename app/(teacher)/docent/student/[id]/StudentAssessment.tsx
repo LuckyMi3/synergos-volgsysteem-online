@@ -5,14 +5,6 @@ import { getRubric } from "@/lib/rubrics";
 
 type Moment = "M1" | "M2" | "M3";
 
-type TeacherLite = {
-  id?: string;
-  voornaam?: string | null;
-  tussenvoegsel?: string | null;
-  achternaam?: string | null;
-  email?: string | null;
-};
-
 type BundleScore = {
   id: string;
   themeId: string;
@@ -48,11 +40,6 @@ type BundleAssessment = {
   scores: BundleScore[];
   teacherScores: BundleTeacherScore[];
   teacherReview: BundleTeacherReview | null;
-};
-
-type MeResponse = {
-  id?: string;
-  role?: string;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -117,15 +104,16 @@ function rowKey(themeId: string, questionId: string) {
 export default function StudentAssessment({
   studentId,
   rubricKey,
+  teacherId,
 }: {
   studentId: string;
   rubricKey: string;
+  teacherId: string;
 }) {
   const moments: Moment[] = useMemo(() => ["M1", "M2", "M3"], []);
   const rubric = useMemo(() => getRubric(rubricKey), [rubricKey]);
 
   const [moment, setMoment] = useState<Moment>("M1");
-  const [teacherId, setTeacherId] = useState<string>("");
   const [assessmentId, setAssessmentId] = useState<string>("");
   const [reviewStatus, setReviewStatus] = useState<"DRAFT" | "PUBLISHED" | "NONE">("NONE");
   const [generalFeedback, setGeneralFeedback] = useState("");
@@ -143,12 +131,6 @@ export default function StudentAssessment({
   const min = Number(rubric?.scale?.min ?? 0);
   const max = Number(rubric?.scale?.max ?? 10);
   const mid = defaultValueForRubric(rubric);
-
-  async function fetchMe() {
-    const res = await fetch("/api/me");
-    const me = (await res.json().catch(() => ({}))) as MeResponse;
-    return me?.id ?? "";
-  }
 
   async function ensureAssessment(activeMoment: Moment) {
     const res = await fetch("/api/assessments/ensure", {
@@ -196,17 +178,14 @@ export default function StudentAssessment({
       setLoading(true);
       setStatus("Assessment laden...");
 
-      const meId = teacherId || (await fetchMe());
-      if (!meId) {
+      if (!teacherId) {
         setStatus("Docent kon niet worden bepaald.");
         setLoading(false);
         return;
       }
 
-      setTeacherId(meId);
-
       const ensuredId = await ensureAssessment(activeMoment);
-      const bundle = await loadBundle(meId, activeMoment);
+      const bundle = await loadBundle(teacherId, activeMoment);
 
       const effectiveAssessmentId = bundle?.assessmentId ?? ensuredId;
       setAssessmentId(effectiveAssessmentId);
@@ -251,15 +230,29 @@ export default function StudentAssessment({
   useEffect(() => {
     bootstrap(moment);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moment, studentId, rubricKey]);
+  }, [moment, studentId, rubricKey, teacherId]);
 
-  async function saveQuestion(themeId: string, questionId: string) {
+  useEffect(() => {
+    return () => {
+      Object.values(questionTimers.current).forEach((timer) => {
+        if (timer) clearTimeout(timer);
+      });
+
+      if (reviewTimer.current) {
+        clearTimeout(reviewTimer.current);
+      }
+    };
+  }, []);
+
+  async function saveQuestion(
+    themeId: string,
+    questionId: string,
+    correctedScore: number | null,
+    feedback: string
+  ) {
     if (!assessmentId || !teacherId) return;
 
-    const key = rowKey(themeId, questionId);
-    const row = teacherScores[key];
-
-    await fetch("/api/teacher-scores", {
+    const res = await fetch("/api/teacher-scores", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -269,12 +262,16 @@ export default function StudentAssessment({
         teacherId,
         themeId,
         questionId,
-        correctedScore: row?.correctedScore ?? null,
-        feedback: row?.feedback?.trim() ? row.feedback.trim() : null,
+        correctedScore,
+        feedback: feedback.trim() ? feedback.trim() : null,
       }),
     });
 
-    setStatus(`Docentscore opgeslagen (${moment}).`);
+    if (res.ok) {
+      setStatus(`Docentscore opgeslagen (${moment}).`);
+    } else {
+      setStatus("Docentscore opslaan faalde.");
+    }
   }
 
   function scheduleQuestionSave(themeId: string, questionId: string) {
@@ -285,7 +282,13 @@ export default function StudentAssessment({
     }
 
     questionTimers.current[key] = setTimeout(() => {
-      saveQuestion(themeId, questionId);
+      const row = teacherScores[key];
+      void saveQuestion(
+        themeId,
+        questionId,
+        row?.correctedScore ?? null,
+        row?.feedback ?? ""
+      );
     }, 600);
   }
 
@@ -319,7 +322,7 @@ export default function StudentAssessment({
     }
 
     reviewTimer.current = setTimeout(() => {
-      saveGeneralFeedback(value);
+      void saveGeneralFeedback(value);
     }, 700);
   }
 
@@ -420,10 +423,7 @@ export default function StudentAssessment({
 
       <div className="space-y-4">
         {(rubric?.themes ?? []).map((theme: any) => (
-          <div
-            key={theme.id}
-            className="border rounded-xl overflow-hidden"
-          >
+          <div key={theme.id} className="border rounded-xl overflow-hidden">
             <button
               type="button"
               onClick={() => setOpenTheme(openTheme === theme.id ? null : theme.id)}
@@ -502,42 +502,27 @@ export default function StudentAssessment({
                             value={teacherValue}
                             onChange={(e) => {
                               const newValue = Number(e.target.value);
-                              setTeacherScores((prev) => ({
-                                ...prev,
-                                [key]: {
-                                  correctedScore: newValue,
-                                  feedback: prev[key]?.feedback ?? "",
-                                },
-                              }));
+
+                              setTeacherScores((prev) => {
+                                const next = {
+                                  ...prev,
+                                  [key]: {
+                                    correctedScore: newValue,
+                                    feedback: prev[key]?.feedback ?? "",
+                                  },
+                                };
+
+                                void saveQuestion(
+                                  theme.id,
+                                  q.id,
+                                  newValue,
+                                  next[key].feedback
+                                );
+
+                                return next;
+                              });
 
                               setStatus(`Opslaan docentscore (${moment})...`);
-
-                              fetch("/api/teacher-scores", {
-                                method: "POST",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                },
-                                body: JSON.stringify({
-                                  assessmentId,
-                                  teacherId,
-                                  themeId: theme.id,
-                                  questionId: q.id,
-                                  correctedScore: newValue,
-                                  feedback: teacherScores[key]?.feedback?.trim()
-                                    ? teacherScores[key].feedback.trim()
-                                    : null,
-                                }),
-                              })
-                                .then((res) => {
-                                  if (res.ok) {
-                                    setStatus(`Docentscore opgeslagen (${moment}).`);
-                                  } else {
-                                    setStatus("Docentscore opslaan faalde.");
-                                  }
-                                })
-                                .catch(() => {
-                                  setStatus("Docentscore opslaan faalde.");
-                                });
                             }}
                             className="w-full"
                           />
@@ -552,6 +537,7 @@ export default function StudentAssessment({
                             value={teacherRow.feedback}
                             onChange={(e) => {
                               const value = e.target.value;
+
                               setTeacherScores((prev) => ({
                                 ...prev,
                                 [key]: {
@@ -559,6 +545,7 @@ export default function StudentAssessment({
                                   feedback: value,
                                 },
                               }));
+
                               setStatus(`Opslaan vraagfeedback (${moment})...`);
                               scheduleQuestionSave(theme.id, q.id);
                             }}

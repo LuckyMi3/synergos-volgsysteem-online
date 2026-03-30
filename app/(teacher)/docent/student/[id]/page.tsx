@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
+import { Role } from "@prisma/client";
+import { getSessionUserId } from "@/lib/auth/session";
 import StudentAssessment from "./StudentAssessment";
 
 type Props = {
@@ -41,6 +43,27 @@ function getRubricKeyFromCohortNames(cohortNames: string[]): string {
 export default async function StudentPage({ params }: Props) {
   const { id } = await params;
 
+  const meId = await getSessionUserId();
+  if (!meId) {
+    redirect("/login");
+  }
+
+  const me = await prisma.user.findUnique({
+    where: { id: meId },
+    select: {
+      id: true,
+      role: true,
+    },
+  });
+
+  if (!me) {
+    redirect("/login");
+  }
+
+  if (me.role !== Role.TEACHER && me.role !== Role.ADMIN) {
+    redirect("/login");
+  }
+
   const student = await prisma.user.findUnique({
     where: { id },
     select: {
@@ -52,6 +75,7 @@ export default async function StudentPage({ params }: Props) {
       enrollments: {
         select: {
           id: true,
+          cohortId: true,
           cohort: {
             select: {
               id: true,
@@ -65,13 +89,51 @@ export default async function StudentPage({ params }: Props) {
 
   if (!student) return notFound();
 
+  if (me.role !== Role.ADMIN) {
+    const studentCohortIds = student.enrollments.map((e) => e.cohortId);
+
+    const teacherEnrollment = await prisma.enrollment.findFirst({
+      where: {
+        userId: me.id,
+        cohortId: {
+          in: studentCohortIds.length ? studentCohortIds : ["__none__"],
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!teacherEnrollment) {
+      return (
+        <main style={{ padding: 24 }}>
+          <h1 style={{ fontSize: 28, marginBottom: 12 }}>Geen toegang</h1>
+          <p>Je bent niet gekoppeld aan een cohort van deze student.</p>
+
+          <div style={{ marginTop: 20 }}>
+            <Link
+              href="/docent"
+              style={{
+                display: "inline-block",
+                padding: "10px 14px",
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                textDecoration: "none",
+                color: "#111827",
+                background: "#ffffff",
+              }}
+            >
+              ← Terug naar docent dashboard
+            </Link>
+          </div>
+        </main>
+      );
+    }
+  }
+
   const cohortNames = student.enrollments.map((e) => e.cohort.naam);
   const rubricKey = getRubricKeyFromCohortNames(cohortNames);
 
   return (
     <div className="max-w-6xl mx-auto p-8 space-y-6">
-
-      {/* terugknop */}
       <div>
         <Link
           href="/docent"
@@ -100,8 +162,11 @@ export default async function StudentPage({ params }: Props) {
         </div>
       </section>
 
-      <StudentAssessment studentId={student.id} rubricKey={rubricKey} />
-
+      <StudentAssessment
+        studentId={student.id}
+        rubricKey={rubricKey}
+        teacherId={me.id}
+      />
     </div>
   );
 }
